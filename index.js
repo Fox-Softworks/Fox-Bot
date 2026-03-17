@@ -1,8 +1,9 @@
+// Bu Kod Fox Software Tarafından Fox Bot İçin yazılan açık kaynaklı bir projedir.
 require('dotenv').config();
 const {
     Client, GatewayIntentBits, Partials, Collection, REST, Routes,
     SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ChannelType,
-    ActionRowBuilder, ButtonBuilder, ButtonStyle, ActivityType, AuditLogEvent
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ActivityType
 } = require('discord.js');
 const fs = require('fs');
 
@@ -16,14 +17,12 @@ try {
 
 const kufurListesi = ["amk", "aq", "sg", "oç", "orospu", "pic", "piç", "sikerim", "yavşak", "yavsak", "gavat", "ibne", "pezevenk"];
 
-
 const dbPath = './db.json';
 let db = {};
 if (fs.existsSync(dbPath)) {
     db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
 }
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 4));
-
 
 const client = new Client({
     intents: [
@@ -33,21 +32,17 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildPresences,
         GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildModeration
     ],
     partials: [Partials.Message, Partials.Channel, Partials.GuildMember]
 });
 
-
 const commands = [
-
     new SlashCommandBuilder().setName('yardim').setDescription('Botun komutlarını listeler.'),
     new SlashCommandBuilder().setName('ping').setDescription('Botun gecikme süresini gösterir.'),
     new SlashCommandBuilder().setName('stats').setDescription('Bot istatistiklerini gösterir.'),
     new SlashCommandBuilder().setName('uptime').setDescription('Botun ne kadar süredir aktif olduğunu gösterir.'),
     new SlashCommandBuilder().setName('shardinfo').setDescription('Shard bilgilerini gösterir.'),
-
 
     new SlashCommandBuilder().setName('mute').setDescription('Kullanıcıyı susturur.')
         .addUserOption(o => o.setName('kullanici').setDescription('Susturulacak kullanıcı').setRequired(true))
@@ -61,14 +56,10 @@ const commands = [
     new SlashCommandBuilder().setName('ban').setDescription('Kullanıcıyı sunucudan yasaklar.')
         .addUserOption(o => o.setName('kullanici').setDescription('Yasaklanacak kullanıcı').setRequired(true))
         .addStringOption(o => o.setName('sebep').setDescription('Yasaklanma sebebi')),
-    new SlashCommandBuilder().setName('warn').setDescription('Kullanıcıyı uyarır.')
-        .addUserOption(o => o.setName('kullanici').setDescription('Uyarılacak kullanıcı').setRequired(true))
-        .addStringOption(o => o.setName('sebep').setDescription('Uyarı sebebi')),
     new SlashCommandBuilder().setName('purge').setDescription('Belirtilen miktarda mesajı siler.')
         .addIntegerOption(o => o.setName('miktar').setDescription('Silinecek mesaj sayısı (1-100)').setRequired(true)),
     new SlashCommandBuilder().setName('clear').setDescription('Belirtilen miktarda mesajı siler.')
         .addIntegerOption(o => o.setName('miktar').setDescription('Silinecek mesaj sayısı (1-100)').setRequired(true)),
-
 
     new SlashCommandBuilder().setName('avatar').setDescription('Kullanıcının profil fotoğrafını gösterir.')
         .addUserOption(o => o.setName('kullanici').setDescription('Kullanıcı seçin')),
@@ -80,7 +71,6 @@ const commands = [
         .addRoleOption(o => o.setName('rol').setDescription('Rol seçin').setRequired(true)),
     new SlashCommandBuilder().setName('serverinfo').setDescription('Sunucu bilgilerini gösterir.'),
 
-
     new SlashCommandBuilder().setName('addrole').setDescription('Kullanıcıya rol verir.')
         .addUserOption(o => o.setName('kullanici').setDescription('Kullanıcı').setRequired(true))
         .addRoleOption(o => o.setName('rol').setDescription('Verilecek Rol').setRequired(true)),
@@ -91,7 +81,6 @@ const commands = [
         .addRoleOption(o => o.setName('rol').setDescription('Rol').setRequired(true)),
     new SlashCommandBuilder().setName('autorole').setDescription('Sunucuya katılanlara otomatik verilecek rolü ayarlar (rolü belirtmezseniz kapatır).')
         .addRoleOption(o => o.setName('rol').setDescription('Oto-Rol (opsiyonel)')),
-
 
     new SlashCommandBuilder().setName('modlog').setDescription('Moderasyon log kanalını ayarlar.')
         .addChannelOption(o => o.setName('kanal').setDescription('Log kanalı').addChannelTypes(ChannelType.GuildText)),
@@ -105,7 +94,6 @@ const commands = [
         .addChannelOption(o => o.setName('kanal').setDescription('Log kanalı').addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('setlog').setDescription('Tüm logları tek bir kanala ayarlar.')
         .addChannelOption(o => o.setName('kanal').setDescription('Ana log kanalı').addChannelTypes(ChannelType.GuildText)),
-
 
     new SlashCommandBuilder().setName('antimention').setDescription('Toplu etiket atılmasını engeller (Aç/Kapat).')
         .addBooleanOption(o => o.setName('durum').setDescription('Aktif mi?').setRequired(true)),
@@ -122,7 +110,6 @@ const commands = [
     new SlashCommandBuilder().setName('capslimit').setDescription('Büyük harf kullanım sınırını açar/kapatır.')
         .addBooleanOption(o => o.setName('durum').setDescription('Aktif mi?').setRequired(true)),
 
-
     new SlashCommandBuilder().setName('ticket_setup').setDescription('Ticket sistemini kurar.'),
     new SlashCommandBuilder().setName('verification').setDescription('Doğrulama (Kayıt) sistemini kurar.')
         .addRoleOption(o => o.setName('verilecek_rol').setDescription('Doğrulanınca verilecek rol').setRequired(true)),
@@ -132,7 +119,6 @@ const commands = [
         .addChannelOption(o => o.setName('kanal').setDescription('Kanal').addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('setprefix').setDescription('Slash komutları olduğu için prefix kullanılmaz, sadece bilgi amaçlıdır.'),
     
-
     new SlashCommandBuilder().setName('sunucukur').setDescription('Sunucuyu otomatik olarak baştan kurar.'),
     new SlashCommandBuilder().setName('reset').setDescription('Sunucu yapılandırmasını sıfırlar (Kişiselleştirmeyi bitirir).'),
     new SlashCommandBuilder().setName('motivasyon').setDescription('Rastgele bir motivasyon sözü gönderir.'),
@@ -143,7 +129,6 @@ const commands = [
     new SlashCommandBuilder().setName('selamla').setDescription('Bot belirtilen kullanıcıyı selamlar.')
         .addUserOption(o => o.setName('kisi').setDescription('Selamlanacak kişi').setRequired(true))
 ];
-
 
 const checkPerm = (interaction, perm) => {
     if (!interaction.member.permissions.has(perm)) {
@@ -170,49 +155,6 @@ const sendModLog = async (guild, action, target, moderator, reason) => {
         .setTimestamp();
     channel.send({ embeds: [embed] });
 };
-
-const safeText = (v, fallback = '—') => {
-    if (v === null || v === undefined) return fallback;
-    const s = String(v);
-    if (!s.trim()) return fallback;
-    return s.length > 1024 ? s.slice(0, 1021) + '...' : s;
-};
-
-const pickLogChannel = (guild, keys = []) => {
-    const conf = db[guild.id] || {};
-    for (const k of keys) {
-        const id = conf[k];
-        if (!id) continue;
-        const ch = guild.channels.cache.get(id);
-        if (ch) return ch;
-    }
-
-    const fallbackId = conf.modlog || conf.messagelog || conf.joinlog || conf.leavelog;
-    return fallbackId ? guild.channels.cache.get(fallbackId) : null;
-};
-
-const sendLogEmbed = async (guild, keys, embed) => {
-    const channel = pickLogChannel(guild, keys);
-    if (!channel) return;
-    return channel.send({ embeds: [embed] }).catch(() => {});
-};
-
-const fetchRecentAuditEntry = async (guild, type, targetId, maxAgeMs = 12_000) => {
-    try {
-        const logs = await guild.fetchAuditLogs({ type, limit: 6 });
-        const now = Date.now();
-        const entry = logs.entries.find(e => {
-            if (!e) return false;
-            if (targetId && e.target?.id !== targetId) return false;
-            if (e.createdTimestamp && now - e.createdTimestamp > maxAgeMs) return false;
-            return true;
-        });
-        return entry || null;
-    } catch {
-        return null;
-    }
-};
-
 
 client.once('ready', async () => {
     console.log(`${client.user.tag} olarak giriş yapıldı!`);
@@ -244,7 +186,6 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
-
     if (interaction.isButton()) {
         if (interaction.customId === 'ticket_olustur') {
             const channel = await interaction.guild.channels.create({
@@ -280,7 +221,6 @@ client.on('interactionCreate', async interaction => {
 
     try {
         switch (commandName) {
-
             case 'yardim': {
                 const helpEmbed = new EmbedBuilder()
                     .setColor('Blue')
@@ -294,7 +234,8 @@ client.on('interactionCreate', async interaction => {
                         { name: '🛡️ Güvenlik', value: '`/antimention`, `/antiraid`, `/antibot`, `/antilink`, `/antispam`, `/antiinvite`, `/capslimit`' },
                         { name: '⚙️ Sistem', value: '`/ticket_setup`, `/verification`, `/welcome`, `/goodbye`, `/setprefix`, `/sunucukur`, `/reset`' },
                         { name: '✨ Eğlence & Diğer', value: '`/motivasyon`, `/tkm`, `/mesaj`, `/selamla`' }
-                    );
+                    )
+                    .setFooter({ text: '🧑‍💻 MustafaDev, Fox Software Tarafından Tasarlandı' });
                 await interaction.reply({ embeds: [helpEmbed] });
                 break;
             }
@@ -318,7 +259,6 @@ client.on('interactionCreate', async interaction => {
             case 'shardinfo':
                 await interaction.reply(`Bu bot tek shard ile çalışmaktadır. Shard ID: 0`);
                 break;
-
 
             case 'mute': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.ModerateMembers)) return;
@@ -356,17 +296,6 @@ client.on('interactionCreate', async interaction => {
                 sendModLog(guild, 'Ban', target, user, reason);
                 break;
             }
-            case 'warn': {
-                if (!checkPerm(interaction, PermissionsBitField.Flags.ModerateMembers)) return;
-                const target = options.getUser('kullanici');
-                const reason = options.getString('sebep') || 'Sebep belirtilmedi';
-                if (!db[guildId].warnings) db[guildId].warnings = {};
-                db[guildId].warnings[target.id] = (db[guildId].warnings[target.id] || 0) + 1;
-                saveDB();
-                await interaction.reply(`${target.tag} uyarıldı. (Toplam uyarı: ${db[guildId].warnings[target.id]})`);
-                sendModLog(guild, 'Warn', target, user, reason);
-                break;
-            }
             case 'purge':
             case 'clear': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.ManageMessages)) return;
@@ -376,7 +305,6 @@ client.on('interactionCreate', async interaction => {
                 await interaction.reply({ content: `${amount} mesaj silindi.`, ephemeral: true });
                 break;
             }
-
 
             case 'avatar': {
                 const target = options.getUser('kullanici') || user;
@@ -481,7 +409,6 @@ client.on('interactionCreate', async interaction => {
                 break;
             }
 
-
             case 'modlog':
             case 'leavelog':
             case 'joinlog':
@@ -523,7 +450,6 @@ client.on('interactionCreate', async interaction => {
                 break;
             }
 
-
             case 'ticket_setup': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.Administrator)) return;
                 const embed = new EmbedBuilder()
@@ -556,7 +482,6 @@ client.on('interactionCreate', async interaction => {
             case 'setprefix':
                 await interaction.reply('Bu bot tamamen Slash (/) komutları kullanmaktadır. Prefix ayarlamanıza gerek yoktur.');
                 break;
-
 
             case 'sunucukur': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.Administrator)) return;
@@ -627,24 +552,12 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-
-const userMessageCache = new Map(); 
+const userMessageCache = new Map();
 
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
     const guildId = message.guild.id;
     const conf = db[guildId] || {};
-
-
-    if (message.embeds?.length) {
-        const embed = new EmbedBuilder()
-            .setColor('Blue')
-            .setTitle('Embed Mesaj')
-            .setDescription(`**Yazan:** ${message.author}\n**Kanal:** ${message.channel}\n**Embed Sayısı:** ${message.embeds.length}`)
-            .setTimestamp();
-        sendLogEmbed(message.guild, ['messagelog'], embed);
-    }
-
 
     const lowerMessage = message.content.toLowerCase();
     const hasKufur = kufurListesi.some(word => lowerMessage.includes(word));
@@ -655,7 +568,6 @@ client.on('messageCreate', async message => {
         }
     }
 
-
     if (lowerMessage.startsWith('fox bot')) {
         if (groq) {
             const userPrompt = message.content.substring(7).trim();
@@ -665,10 +577,13 @@ client.on('messageCreate', async message => {
                 await message.channel.sendTyping();
                 const completion = await groq.chat.completions.create({
                     messages: [
-                        { role: 'system', content: 'Sen Fox Bot isimli Türkçe konuşan, esprili ve çok zeki bir yapay zeka Discord botusun.' },
+                       {
+ role: "system",
+ content: `Sen Bir Discord Botusun....` // Bu Kısım Sistem promptu kısmıdır burayı kendinize göre yapcaksınız
+},
                         { role: 'user', content: userPrompt }
                     ],
-                    model: 'llama3-8b-8192',
+                    model: 'llama-3.1-8b-instant',
                 });
                 const cevap = completion.choices[0]?.message?.content || 'Üzgünüm, şu an bağlantı kuramıyorum.';
                 return message.reply(cevap);
@@ -683,11 +598,10 @@ client.on('messageCreate', async message => {
 
     if (message.member && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
-
     if (conf.antilink) {
         const linkRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.(com|net|org|xyz|io|gg|me|tr|ru|net|gov|edu)\b([a-zA-Z0-9()@:%_\+.~#?&//=]*))/i;
         if (linkRegex.test(message.content)) {
-            await message.delete().catch(() => {});
+            await message.delete ().catch(() => {});
             return message.channel.send(`${message.author}, bu sunucuda link paylaşımı yasaktır!`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
         }
     }
@@ -700,15 +614,13 @@ client.on('messageCreate', async message => {
         }
     }
 
-
     if (conf.capslimit && message.content.length > 5) {
         const caps = message.content.replace(/[^A-Z]/g, '').length;
-        if (caps / message.content.length > 0.7) { // %70'den fazlası büyük harfse
+        if (caps / message.content.length > 0.7) {
             await message.delete().catch(() => {});
             return message.channel.send(`${message.author}, lütfen çok fazla büyük harf kullanmayın!`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
         }
     }
-
 
     if (conf.antimention && message.mentions.users.size > 5) {
         await message.delete().catch(() => {});
@@ -741,42 +653,23 @@ client.on('messageCreate', async message => {
     }
 });
 
-
-client.on('messageCreate', async message => {
-    if (!message.guild) return;
-    if (!message.author?.bot) return;
-    const conf = db[message.guild.id] || {};
-    if (!conf.messagelog && !conf.modlog) return;
-    const embed = new EmbedBuilder()
-        .setColor('Grey')
-        .setTitle('Bot Mesajı')
-        .setDescription(`**Bot:** ${message.author}\n**Kanal:** ${message.channel}\n**İçerik:** ${safeText(message.content || '—')}`)
-        .setTimestamp();
-    sendLogEmbed(message.guild, ['messagelog'], embed);
-});
-
-
 client.on('guildMemberAdd', async member => {
     const guildId = member.guild.id;
     const conf = db[guildId] || {};
-
 
     if (conf.antibot && member.user.bot) {
         await member.kick('Anti-Bot sistemi aktif.');
         return;
     }
 
-
     if (conf.autorole && !member.user.bot) {
         await member.roles.add(conf.autorole).catch(() => {});
     }
-
 
     if (conf.welcome) {
         const channel = member.guild.channels.cache.get(conf.welcome);
         if (channel) channel.send(`merhaba <@${member.user.id}>!`);
     }
-
 
     if (conf.joinlog) {
         const channel = member.guild.channels.cache.get(conf.joinlog);
@@ -790,52 +683,29 @@ client.on('guildMemberAdd', async member => {
         }
     }
 
-
     if (conf.antiraid) {
         const now = Date.now();
         const joins = client.guildMemberAdds?.filter(j => j.guildId === guildId && now - j.timestamp < 10000) || [];
         if (joins.length >= 5) {
-
             await member.guild.setVerificationLevel(3).catch(() => {});
             const logChan = member.guild.channels.cache.get(conf.modlog || conf.joinlog);
             if (logChan) logChan.send('🚨 Anti-Raid tetiklendi! Sunucu yüksek güvenliğe alındı.');
         }
-
         if (!client.guildMemberAdds) client.guildMemberAdds = [];
         client.guildMemberAdds.push({ guildId, timestamp: now });
         setTimeout(() => { client.guildMemberAdds.shift(); }, 10000);
     }
 });
 
-
 client.on('guildMemberRemove', async member => {
     const guildId = member.guild.id;
     const conf = db[guildId] || {};
-
-
-    const kickEntry = await fetchRecentAuditEntry(member.guild, AuditLogEvent.MemberKick, member.id);
-    if (kickEntry) {
-        const embed = new EmbedBuilder()
-            .setColor('DarkOrange')
-            .setTitle('Kick')
-            .setDescription(`${member.user.tag} sunucudan atıldı (kick).`)
-            .addFields(
-                { name: 'Yetkili', value: safeText(kickEntry.executor ? `${kickEntry.executor} (${kickEntry.executor.id})` : 'Bilinmiyor'), inline: true },
-                { name: 'Sebep', value: safeText(kickEntry.reason || 'Belirtilmemiş') }
-            )
-            .setTimestamp();
-        await sendLogEmbed(member.guild, ['modlog', 'leavelog'], embed);
-
-        return;
-    }
-
 
     if (conf.goodbye) {
         const channel = member.guild.channels.cache.get(conf.goodbye);
         if (channel) channel.send(`güle güle <@${member.user.id}>, seni iyi biri bilirdik diye...`);
     }
 
-    
     if (conf.leavelog) {
         const channel = member.guild.channels.cache.get(conf.leavelog);
         if (channel) {
@@ -847,7 +717,6 @@ client.on('guildMemberRemove', async member => {
         }
     }
 });
-
 
 client.on('messageDelete', async message => {
     if (message.author?.bot || !message.guild) return;
@@ -865,7 +734,6 @@ client.on('messageDelete', async message => {
     }
 });
 
-// Mesaj düzenleme logu
 client.on('messageUpdate', async (oldMessage, newMessage) => {
     if (oldMessage.author?.bot || !oldMessage.guild || oldMessage.content === newMessage.content) return;
     const conf = db[oldMessage.guild.id] || {};
@@ -882,36 +750,6 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
     }
 });
 
-
-client.on('guildBanAdd', async ban => {
-    const entry = await fetchRecentAuditEntry(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
-    const embed = new EmbedBuilder()
-        .setColor('Red')
-        .setTitle('Ban')
-        .setDescription(`${ban.user.tag} sunucudan yasaklandı.`)
-        .addFields(
-            { name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor'), inline: true },
-            { name: 'Sebep', value: safeText(entry?.reason || 'Belirtilmemiş') }
-        )
-        .setTimestamp();
-    sendLogEmbed(ban.guild, ['modlog'], embed);
-});
-
-client.on('guildBanRemove', async ban => {
-    const entry = await fetchRecentAuditEntry(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id);
-    const embed = new EmbedBuilder()
-        .setColor('Green')
-        .setTitle('Unban')
-        .setDescription(`${ban.user.tag} sunucudan yasağı kaldırıldı.`)
-        .addFields(
-            { name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor'), inline: true },
-            { name: 'Sebep', value: safeText(entry?.reason || 'Belirtilmemiş') }
-        )
-        .setTimestamp();
-    sendLogEmbed(ban.guild, ['modlog'], embed);
-});
-
-// Rol oluşturma, Rol silme, Kanal silme Logları
 client.on('roleCreate', async role => {
     const conf = db[role.guild.id] || {};
     if (conf.modlog || conf.messagelog) {
@@ -932,22 +770,6 @@ client.on('roleDelete', async role => {
     }
 });
 
-client.on('roleUpdate', async (oldRole, newRole) => {
-    const changed = [];
-    if (oldRole.name !== newRole.name) changed.push(`İsim: **${oldRole.name}** → **${newRole.name}**`);
-    if (oldRole.color !== newRole.color) changed.push(`Renk: **${oldRole.hexColor}** → **${newRole.hexColor}**`);
-    if (oldRole.permissions.bitfield !== newRole.permissions.bitfield) changed.push('İzinler değişti');
-    if (!changed.length) return;
-    const entry = await fetchRecentAuditEntry(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-    const embed = new EmbedBuilder()
-        .setColor('Yellow')
-        .setTitle('Rol Düzenlendi')
-        .setDescription(`${newRole} rolü güncellendi.\n${changed.map(x => `- ${x}`).join('\n')}`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(newRole.guild, ['modlog'], embed);
-});
-
 client.on('channelDelete', async channel => {
     if (!channel.guild) return;
     const conf = db[channel.guild.id] || {};
@@ -959,142 +781,7 @@ client.on('channelDelete', async channel => {
     }
 });
 
-client.on('channelCreate', async channel => {
-    if (!channel.guild) return;
-    const entry = await fetchRecentAuditEntry(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
-    const embed = new EmbedBuilder()
-        .setColor('Green')
-        .setTitle('Kanal Oluşturuldu')
-        .setDescription(`Yeni Kanal: ${channel} (${channel.name})`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(channel.guild, ['modlog'], embed);
-});
-
-client.on('channelUpdate', async (oldChannel, newChannel) => {
-    if (!newChannel.guild) return;
-    const changes = [];
-    if (oldChannel.name !== newChannel.name) changes.push(`İsim: **${oldChannel.name}** → **${newChannel.name}**`);
-    if (oldChannel.parentId !== newChannel.parentId) changes.push('Kategori değişti');
-    if (oldChannel.rawPosition !== newChannel.rawPosition) changes.push('Sıralama değişti');
-    // İzin (overwrite) değişimleri detaylı hesaplanabilir ama pahalı; burada audit log'a güveniyoruz.
-    if (oldChannel.permissionOverwrites?.cache?.size !== newChannel.permissionOverwrites?.cache?.size) changes.push('İzinler (overwrite) değişti');
-    if (!changes.length) return;
-    const entry = await fetchRecentAuditEntry(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
-    const embed = new EmbedBuilder()
-        .setColor('Yellow')
-        .setTitle('Kanal Güncellendi')
-        .setDescription(`${newChannel}\n${changes.map(x => `- ${x}`).join('\n')}`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(newChannel.guild, ['modlog'], embed);
-});
-
-
-client.on('guildUpdate', async (oldGuild, newGuild) => {
-    const changes = [];
-    if (oldGuild.name !== newGuild.name) changes.push(`İsim: **${oldGuild.name}** → **${newGuild.name}**`);
-    if (oldGuild.icon !== newGuild.icon) changes.push('Sunucu ikonu değişti');
-    if (oldGuild.banner !== newGuild.banner) changes.push('Sunucu banner değişti');
-    if (oldGuild.verificationLevel !== newGuild.verificationLevel) changes.push('Doğrulama seviyesi değişti');
-    if (!changes.length) return;
-    const entry = await fetchRecentAuditEntry(newGuild, AuditLogEvent.GuildUpdate, newGuild.id);
-    const embed = new EmbedBuilder()
-        .setColor('Yellow')
-        .setTitle('Sunucu Ayarları Güncellendi')
-        .setDescription(changes.map(x => `- ${x}`).join('\n'))
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(newGuild, ['modlog'], embed);
-});
-
-
-client.on('emojiCreate', async emoji => {
-    const entry = await fetchRecentAuditEntry(emoji.guild, AuditLogEvent.EmojiCreate, emoji.id);
-    const embed = new EmbedBuilder()
-        .setColor('Green')
-        .setTitle('Emoji Eklendi')
-        .setDescription(`${emoji} **:${emoji.name}:**`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(emoji.guild, ['modlog'], embed);
-});
-
-client.on('emojiDelete', async emoji => {
-    const entry = await fetchRecentAuditEntry(emoji.guild, AuditLogEvent.EmojiDelete, emoji.id);
-    const embed = new EmbedBuilder()
-        .setColor('Red')
-        .setTitle('Emoji Silindi')
-        .setDescription(`**:${emoji.name}:**`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(emoji.guild, ['modlog'], embed);
-});
-
-
-client.on('guildStickerCreate', async sticker => {
-    const entry = await fetchRecentAuditEntry(sticker.guild, AuditLogEvent.StickerCreate, sticker.id);
-    const embed = new EmbedBuilder()
-        .setColor('Green')
-        .setTitle('Sticker Eklendi')
-        .setDescription(`**${sticker.name}**`)
-        .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-        .setTimestamp();
-    sendLogEmbed(sticker.guild, ['modlog'], embed);
-});
-
-
-client.on('webhookUpdate', async channel => {
-    if (!channel?.guild) return;
-    const created = await fetchRecentAuditEntry(channel.guild, AuditLogEvent.WebhookCreate, null);
-    const deleted = await fetchRecentAuditEntry(channel.guild, AuditLogEvent.WebhookDelete, null);
-    const entry = created || deleted;
-    if (!entry) return;
-    const isCreate = entry.action === AuditLogEvent.WebhookCreate;
-    const embed = new EmbedBuilder()
-        .setColor(isCreate ? 'Green' : 'Red')
-        .setTitle(isCreate ? 'Webhook Oluşturuldu' : 'Webhook Silindi')
-        .setDescription(`**Kanal:** ${channel}`)
-        .addFields(
-            { name: 'Yetkili', value: safeText(entry.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor'), inline: true },
-            { name: 'Sebep', value: safeText(entry.reason || 'Belirtilmemiş') }
-        )
-        .setTimestamp();
-    sendLogEmbed(channel.guild, ['modlog'], embed);
-});
-
 client.on('guildMemberUpdate', async (oldMember, newMember) => {
-
-    if (oldMember.nickname !== newMember.nickname) {
-        const entry = await fetchRecentAuditEntry(newMember.guild, AuditLogEvent.MemberUpdate, newMember.id);
-        const embed = new EmbedBuilder()
-            .setColor('Blue')
-            .setTitle('Nickname Değişti')
-            .setDescription(`${newMember.user}\n**Eski:** ${safeText(oldMember.nickname || oldMember.user.username)}\n**Yeni:** ${safeText(newMember.nickname || newMember.user.username)}`)
-            .addFields({ name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor') })
-            .setTimestamp();
-        sendLogEmbed(newMember.guild, ['modlog'], embed);
-    }
-
-
-    const oldT = oldMember.communicationDisabledUntilTimestamp || 0;
-    const newT = newMember.communicationDisabledUntilTimestamp || 0;
-    if (oldT !== newT) {
-        const entry = await fetchRecentAuditEntry(newMember.guild, AuditLogEvent.MemberUpdate, newMember.id);
-        const isTimedOut = newT && newT > Date.now();
-        const embed = new EmbedBuilder()
-            .setColor(isTimedOut ? 'Red' : 'Green')
-            .setTitle(isTimedOut ? 'Timeout Uygulandı' : 'Timeout Kaldırıldı')
-            .setDescription(`${newMember.user}`)
-            .addFields(
-                { name: 'Bitiş', value: isTimedOut ? `<t:${Math.floor(newT / 1000)}:R>` : '—', inline: true },
-                { name: 'Yetkili', value: safeText(entry?.executor ? `${entry.executor} (${entry.executor.id})` : 'Bilinmiyor'), inline: true },
-                { name: 'Sebep', value: safeText(entry?.reason || 'Belirtilmemiş') }
-            )
-            .setTimestamp();
-        sendLogEmbed(newMember.guild, ['modlog'], embed);
-    }
-
     if (oldMember.roles.cache.size < newMember.roles.cache.size) {
         const addedRole = newMember.roles.cache.find(r => !oldMember.roles.cache.has(r.id));
         const conf = db[newMember.guild.id] || {};
@@ -1115,82 +802,5 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         }
     }
 });
-
-client.on('userUpdate', async (oldUser, newUser) => {
-    if (oldUser.avatar === newUser.avatar) return;
-    for (const guild of client.guilds.cache.values()) {
-        const conf = db[guild.id] || {};
-        if (!conf.modlog && !conf.messagelog) continue;
-        const member = await guild.members.fetch(newUser.id).catch(() => null);
-        if (!member) continue;
-        const embed = new EmbedBuilder()
-            .setColor('Blue')
-            .setTitle('Avatar Değişti')
-            .setDescription(`${newUser} (${newUser.tag})`)
-            .setThumbnail(newUser.displayAvatarURL({ dynamic: true, size: 256 }))
-            .addFields(
-                { name: 'Eski', value: safeText(oldUser.displayAvatarURL({ dynamic: true, size: 256 })), inline: false },
-                { name: 'Yeni', value: safeText(newUser.displayAvatarURL({ dynamic: true, size: 256 })), inline: false }
-            )
-            .setTimestamp();
-        sendLogEmbed(guild, ['modlog'], embed);
-    }
-});
-
-
-client.on('voiceStateUpdate', async (oldState, newState) => {
-    const guild = newState.guild;
-    const member = newState.member || oldState.member;
-    if (!guild || !member) return;
-    const conf = db[guild.id] || {};
-    if (!conf.modlog && !conf.messagelog) return;
-
-    const oldCh = oldState.channel;
-    const newCh = newState.channel;
-
-    if (!oldCh && newCh) {
-        const embed = new EmbedBuilder()
-            .setColor('Green')
-            .setTitle('Ses Kanalına Girdi')
-            .setDescription(`${member.user} → ${newCh}`)
-            .setTimestamp();
-        return sendLogEmbed(guild, ['modlog'], embed);
-    }
-    if (oldCh && !newCh) {
-        const embed = new EmbedBuilder()
-            .setColor('Red')
-            .setTitle('Ses Kanalından Çıktı')
-            .setDescription(`${member.user} ← ${oldCh}`)
-            .setTimestamp();
-        return sendLogEmbed(guild, ['modlog'], embed);
-    }
-    if (oldCh && newCh && oldCh.id !== newCh.id) {
-        const embed = new EmbedBuilder()
-            .setColor('Yellow')
-            .setTitle('Ses Kanalı Değişti')
-            .setDescription(`${member.user}\n**Eski:** ${oldCh}\n**Yeni:** ${newCh}`)
-            .setTimestamp();
-        return sendLogEmbed(guild, ['modlog'], embed);
-    }
-
-    if (oldState.selfMute !== newState.selfMute) {
-        const embed = new EmbedBuilder()
-            .setColor(newState.selfMute ? 'Red' : 'Green')
-            .setTitle(newState.selfMute ? 'Self Mute Oldu' : 'Self Mute Kaldırdı')
-            .setDescription(`${member.user}`)
-            .setTimestamp();
-        return sendLogEmbed(guild, ['modlog'], embed);
-    }
-
-    if (oldState.selfDeaf !== newState.selfDeaf) {
-        const embed = new EmbedBuilder()
-            .setColor(newState.selfDeaf ? 'Red' : 'Green')
-            .setTitle(newState.selfDeaf ? 'Self Deafen Oldu' : 'Self Deafen Kaldırdı')
-            .setDescription(`${member.user}`)
-            .setTimestamp();
-        return sendLogEmbed(guild, ['modlog'], embed);
-    }
-});
-
 
 client.login(process.env.TOKEN);
