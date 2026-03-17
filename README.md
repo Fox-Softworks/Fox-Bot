@@ -45,13 +45,8 @@ git clone https://github.com/MustafaDevloper/FoxBot.git
 cd FoxBot
 ```
 
----
 
-## 3. Gerekli paketleri yükleyin
 
-```
-pip install -r requirements.txt
-```
 
 ---
 
