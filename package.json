@@ -1,7 +1,7 @@
 {
-  "name": "gelismis-discord-botu",
+  "name": "Fox bot",
   "version": "1.0.0",
-  "description": "Gelişmiş Moderasyon, Kayıt ve Güvenlik Botu",
+  "description": "Discord Moderasyon Botu",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
