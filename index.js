@@ -1,11 +1,21 @@
-// Bu Kod Fox Software Tarafından Fox Bot İçin yazılan açık kaynaklı bir projedir.
 require('dotenv').config();
 const {
     Client, GatewayIntentBits, Partials, Collection, REST, Routes,
     SlashCommandBuilder, EmbedBuilder, PermissionsBitField, ChannelType,
     ActionRowBuilder, ButtonBuilder, ButtonStyle, ActivityType
 } = require('discord.js');
+
 const fs = require('fs');
+const path = require('path');
+
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const ElevenLabs = require('elevenlabs-node');
+
+// ElevenLabs API anahtarını .env'den çekiyoruz
+const voice = new ElevenLabs({
+    apiKey: process.env.ELEVEN_API_KEY, 
+    voiceId: "pNInz6obpg8ndclK7Abv", // İstediğin ses ID'si
+});
 
 let groq;
 try {
@@ -15,7 +25,7 @@ try {
     console.log("Groq SDK yüklü değil.");
 }
 
-const kufurListesi = ["amk", "aq", "sg", "oç", "orospu", "pic", "piç", "sikerim", "yavşak", "yavsak", "gavat", "ibne", "pezevenk"];
+const kufurListesi = ["amk", "aq", "sg", "oç", "orospu", "pic", "piç", "sikerim", "yavşak", "yavsak", "gavat", "ibne", "pezevenk", "yarram", "31", "pornhub"];
 
 const dbPath = './db.json';
 let db = {};
@@ -119,7 +129,9 @@ const commands = [
         .addChannelOption(o => o.setName('kanal').setDescription('Kanal').addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('setprefix').setDescription('Slash komutları olduğu için prefix kullanılmaz, sadece bilgi amaçlıdır.'),
     
-    new SlashCommandBuilder().setName('sunucukur').setDescription('Sunucuyu otomatik olarak baştan kurar.'),
+    new SlashCommandBuilder().setName('sunucukur').setDescription('Sunucuyu profesyonel bir şekilde otomatik kurar.')
+        .addStringOption(o => o.setName('tema').setDescription('Kurulacak tema').setRequired(true)
+            .addChoices({name: 'Genel Topluluk', value: 'genel'}, {name: 'Oyun Sunucusu', value: 'oyun'})),
     new SlashCommandBuilder().setName('reset').setDescription('Sunucu yapılandırmasını sıfırlar (Kişiselleştirmeyi bitirir).'),
     new SlashCommandBuilder().setName('motivasyon').setDescription('Rastgele bir motivasyon sözü gönderir.'),
     new SlashCommandBuilder().setName('tkm').setDescription('Taş, Kağıt, Makas oynatır.')
@@ -127,7 +139,9 @@ const commands = [
     new SlashCommandBuilder().setName('mesaj').setDescription('Bota istediğiniz mesajı yazdırırsınız.')
         .addStringOption(o => o.setName('metin').setDescription('Botun yazacağı mesaj').setRequired(true)),
     new SlashCommandBuilder().setName('selamla').setDescription('Bot belirtilen kullanıcıyı selamlar.')
-        .addUserOption(o => o.setName('kisi').setDescription('Selamlanacak kişi').setRequired(true))
+        .addUserOption(o => o.setName('kisi').setDescription('Selamlanacak kişi').setRequired(true)),
+    new SlashCommandBuilder().setName('seslendir').setDescription('Yazdığınız metni sesli kanalda okur.')
+    .addStringOption(o => o.setName('metin').setDescription('Okunacak metin').setRequired(true)),
 ];
 
 const checkPerm = (interaction, perm) => {
@@ -141,8 +155,16 @@ const checkPerm = (interaction, perm) => {
 const sendModLog = async (guild, action, target, moderator, reason) => {
     const conf = db[guild.id] || {};
     if (!conf.modlog) return;
+
     const channel = guild.channels.cache.get(conf.modlog);
     if (!channel) return;
+
+    // 🔒 Sebep uzunsa kes (embed limit 1024)
+    let safeReason = reason || 'Belirtilmemiş';
+    if (safeReason.length > 1000) {
+        safeReason = safeReason.slice(0, 1000) + '... (kısaltıldı)';
+    }
+
     const embed = new EmbedBuilder()
         .setColor('Orange')
         .setTitle('Moderasyon İşlemi')
@@ -150,21 +172,35 @@ const sendModLog = async (guild, action, target, moderator, reason) => {
             { name: 'İşlem', value: action, inline: true },
             { name: 'Hedef', value: `${target} (${target.id})`, inline: true },
             { name: 'Yetkili', value: `${moderator} (${moderator.id})`, inline: true },
-            { name: 'Sebep', value: reason || 'Belirtilmemiş' }
+            { name: 'Sebep', value: safeReason }
         )
         .setTimestamp();
-    channel.send({ embeds: [embed] });
+
+    await channel.send({ embeds: [embed] });
+
+    // 🔥 Eğer kesildiyse TAM halini ayrı mesaj olarak at
+    if (reason && reason.length > 1000) {
+        const chunks = [];
+        for (let i = 0; i < reason.length; i += 4000) {
+            chunks.push(reason.slice(i, i + 4000));
+        }
+
+        for (const part of chunks) {
+            await channel.send(`📄 **Tam Sebep:**\n${part}`);
+        }
+    }
 };
 
 client.once('ready', async () => {
     console.log(`${client.user.tag} olarak giriş yapıldı!`);
 
     const statuslar = [
-        'Spamcıları avlıyorum 🦊',
-        'Sunucuyu izliyorum 👀',
-        '/yardım yazmayı unutma 💡',
-        'Logları kontrol ediyorum 📂',
-        'Moderasyon aktif 🔨'
+        'Spamcıları avlıyorum',
+        'Sunucuyu izliyorum',
+        '/yardım yazmayı unutma',
+        'Logları kontrol ediyorum',
+        'Moderasyon aktif',
+        '89 Sunucuda'
     ];
 
     let i = 0;
@@ -485,15 +521,71 @@ client.on('interactionCreate', async interaction => {
 
             case 'sunucukur': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.Administrator)) return;
-                await interaction.reply({ content: 'Sunucu kanalları ve kategorileri oluşturuluyor...', ephemeral: false });
+                const tema = options.getString('tema');
+                await interaction.reply({ content: `**${tema.toUpperCase()}** temalı sunucu yapısı oluşturuluyor... Lütfen bekleyin.`, ephemeral: false });
                 
-                const kategori = await guild.channels.create({ name: 'FoxBot Topluluk', type: ChannelType.GuildCategory });
-                await guild.channels.create({ name: 'sohbet', type: ChannelType.GuildText, parent: kategori.id });
-                await guild.channels.create({ name: 'hoş-geldin', type: ChannelType.GuildText, parent: kategori.id });
-                await guild.channels.create({ name: 'kurallar', type: ChannelType.GuildText, parent: kategori.id });
-                await guild.roles.create({ name: 'Üye', color: 'Blue', reason: 'FoxBot Sunucu Kurma' });
+                try {
+                    // 1. Rolleri oluştur
+                    const kurucuRol = await guild.roles.create({ name: '👑 Kurucu', color: '#FF0000', hoist: true, permissions: [PermissionsBitField.Flags.Administrator] });
+                    const yoneticiRol = await guild.roles.create({ name: '🔨 Yönetici', color: '#FFA500', hoist: true, permissions: [PermissionsBitField.Flags.ManageGuild, PermissionsBitField.Flags.BanMembers] });
+                    const modRol = await guild.roles.create({ name: '🛡️ Moderatör', color: '#00FF00', hoist: true, permissions: [PermissionsBitField.Flags.ModerateMembers, PermissionsBitField.Flags.ManageMessages] });
+                    const vipRol = await guild.roles.create({ name: '💎 VIP', color: '#00FFFF', hoist: true });
+                    const uyeRol = await guild.roles.create({ name: '✅ Üye', color: '#FFFFFF', hoist: false });
 
-                await interaction.editReply('Sunucu başarıyla kuruldu ve kişiselleştirildi!');
+                    // 2. Kategoriler ve Kanallar
+                    // --- BİLGİ MERKEZİ ---
+                    const infoKat = await guild.channels.create({ name: '📢 BİLGİ MERKEZİ', type: ChannelType.GuildCategory });
+                    await guild.channels.create({ 
+                        name: '📜│kurallar', 
+                        type: ChannelType.GuildText, 
+                        parent: infoKat.id,
+                        permissionOverwrites: [{ id: guild.id, deny: [PermissionsBitField.Flags.SendMessages] }]
+                    });
+                    await guild.channels.create({ 
+                        name: '📢│duyurular', 
+                        type: ChannelType.GuildText, 
+                        parent: infoKat.id,
+                        permissionOverwrites: [{ id: guild.id, deny: [PermissionsBitField.Flags.SendMessages] }]
+                    });
+                    await guild.channels.create({ name: '🎁│çekiliş', type: ChannelType.GuildText, parent: infoKat.id });
+
+                    // --- GENEL SOHBET ---
+                    const chatKat = await guild.channels.create({ name: '💬 GENEL SOHBET', type: ChannelType.GuildCategory });
+                    await guild.channels.create({ name: '💬│sohbet', type: ChannelType.GuildText, parent: chatKat.id });
+                    await guild.channels.create({ name: '📷│medya', type: ChannelType.GuildText, parent: chatKat.id });
+                    await guild.channels.create({ name: '🤖│bot-komut', type: ChannelType.GuildText, parent: chatKat.id });
+
+                    // --- SES KANALLARI ---
+                    const voiceKat = await guild.channels.create({ name: '🔊 SES KANALLARI', type: ChannelType.GuildCategory });
+                    await guild.channels.create({ name: '🔊 Sohbet Odası', type: ChannelType.GuildVoice, parent: voiceKat.id });
+                    if (tema === 'oyun') {
+                        await guild.channels.create({ name: '🎮 Oyun Odası 1', type: ChannelType.GuildVoice, parent: voiceKat.id });
+                        await guild.channels.create({ name: '🎮 Oyun Odası 2', type: ChannelType.GuildVoice, parent: voiceKat.id });
+                    }
+                    await guild.channels.create({ name: '🎵 Müzik Odası', type: ChannelType.GuildVoice, parent: voiceKat.id });
+
+                    // --- YÖNETİM --- (Özel)
+                    const modKat = await guild.channels.create({ 
+                        name: '🛡️ YÖNETİM', 
+                        type: ChannelType.GuildCategory,
+                        permissionOverwrites: [
+                            { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+                            { id: yoneticiRol.id, allow: [PermissionsBitField.Flags.ViewChannel] },
+                            { id: modRol.id, allow: [PermissionsBitField.Flags.ViewChannel] }
+                        ]
+                    });
+                    const modLog = await guild.channels.create({ name: '📔│mod-log', type: ChannelType.GuildText, parent: modKat.id });
+                    await guild.channels.create({ name: '💬│yetkili-sohbet', type: ChannelType.GuildText, parent: modKat.id });
+
+                    // Modlog kanalını veritabanına kaydet
+                    db[guild.id].modlog = modLog.id;
+                    saveDB();
+
+                    await interaction.editReply(`✅ **${tema === 'oyun' ? 'Oyun' : 'Genel Topluluk'}** temasıyla sunucu başarıyla kuruldu! roller ve kanallar hazır.`);
+                } catch (e) {
+                    console.error(e);
+                    await interaction.editReply('❌ Sunucu kurulurken bir hata oluştu. İzinlerimi kontrol edin.');
+                }
                 break;
             }
             case 'reset': {
@@ -543,6 +635,62 @@ client.on('interactionCreate', async interaction => {
                 await interaction.reply(`Merhaba ${kisi}! 👋 Biri sana selam gönderdi.`);
                 break;
             }
+
+            case 'seslendir': {
+                const metin = options.getString('metin');
+                const voiceChannel = member.voice.channel;
+
+                if (!voiceChannel) return interaction.reply({ content: 'Önce bir ses kanalına girmelisin!', ephemeral: true });
+
+                await interaction.deferReply();
+
+                try {
+                    const fileName = path.join(__dirname, `ses_${user.id}.mp3`);
+
+                    // 1. ElevenLabs üzerinden sesi oluştur
+                    await voice.textToSpeech({
+                        fileName: fileName,
+                        textInput: metin,
+                        stability: 0.5,
+                        similarityBoost: 0.5,
+                        modelId: "eleven_multilingual_v2"
+                    });
+
+                    // 2. Ses kanalına bağlan
+                    const connection = joinVoiceChannel({
+                        channelId: voiceChannel.id,
+                        guildId: guild.id,
+                        adapterCreator: guild.voiceAdapterCreator,
+                    });
+
+                    const player = createAudioPlayer();
+                    const resource = createAudioResource(fileName);
+
+                    player.play(resource);
+                    connection.subscribe(player);
+
+                    await interaction.editReply(`🎙️ **"${metin}"** cümlesi seslendiriliyor...`);
+
+                    // 3. Ses bitince kanaldan çık ve dosyayı sil
+                    player.on(AudioPlayerStatus.Idle, () => {
+                        setTimeout(() => {
+                            connection.destroy();
+                            if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+                        }, 1000);
+                    });
+
+                    player.on('error', error => {
+                        console.error('Audio Player Hatası:', error);
+                        connection.destroy();
+                        if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+                    });
+
+                } catch (error) {
+                    console.error('Seslendirme Hatası:', error);
+                    await interaction.editReply('Seslendirme yapılırken bir hata oluştu. API anahtarını ve kotanı kontrol et.');
+                }
+                break;
+            }
         }
     } catch (error) {
         console.error(error);
@@ -560,6 +708,8 @@ client.on('messageCreate', async message => {
     const conf = db[guildId] || {};
 
     const lowerMessage = message.content.toLowerCase();
+
+    // Küfür filtresi
     const hasKufur = kufurListesi.some(word => lowerMessage.includes(word));
     if (hasKufur) {
         if (!message.member || !message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
@@ -568,44 +718,49 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // Fox Bot AI Sohbet
     if (lowerMessage.startsWith('fox bot')) {
-        if (groq) {
-            const userPrompt = message.content.substring(7).trim();
-            if (!userPrompt) return message.reply("Efendim? Benimle konuşmak için 'fox bot merhaba' gibi bir şey yazabilirsin.");
-            
-            try {
-                await message.channel.sendTyping();
-                const completion = await groq.chat.completions.create({
-                    messages: [
-                       {
- role: "system",
- content: `Sen Bir Discord Botusun....` // Bu Kısım Sistem promptu kısmıdır burayı kendinize göre yapcaksınız
-},
-                        { role: 'user', content: userPrompt }
-                    ],
-                    model: 'llama-3.1-8b-instant',
-                });
-                const cevap = completion.choices[0]?.message?.content || 'Üzgünüm, şu an bağlantı kuramıyorum.';
-                return message.reply(cevap);
-            } catch (err) {
-                console.error("Groq Hatası:", err);
-                return message.reply("Sanırım devrelerim biraz karıştı, daha sonra tekrar dener misin?");
-            }
-        } else {
-            return message.reply("Groq API anahtarım bağlı değil, sana cevap veremiyorum.");
+        if (!groq) return message.reply("Groq API anahtarım bağlı değil, sana cevap veremiyorum.");
+        const userPrompt = message.content.substring(7).trim();
+        if (!userPrompt) return message.reply("Efendim? Benimle konuşmak için 'fox bot merhaba' gibi bir şey yazabilirsin.");
+
+        let systemPrompt = '';
+        try {
+            systemPrompt = fs.readFileSync(path.join(__dirname, 'systemprompt.txt'), 'utf-8');
+        } catch (err) {
+            console.error("System prompt okunamadı:", err);
+            systemPrompt = "Sen Fox Bot adında yardımsever bir Discord botusun.";
+        }
+
+        try {
+            await message.channel.sendTyping();
+            const completion = await groq.chat.completions.create({
+                model: 'llama-3.1-8b-instant',
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ]
+            });
+            const cevap = completion.choices[0]?.message?.content || 'Üzgünüm, şu an bağlantı kuramıyorum.';
+            return message.reply(cevap);
+        } catch (err) {
+            console.error("Groq Hatası:", err);
+            return message.reply("Sanırım devrelerim biraz karıştı, daha sonra tekrar dener misin?");
         }
     }
 
     if (message.member && message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
+    // Link Engeli
     if (conf.antilink) {
         const linkRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)|([a-zA-Z0-9-]+\.(com|net|org|xyz|io|gg|me|tr|ru|net|gov|edu)\b([a-zA-Z0-9()@:%_\+.~#?&//=]*))/i;
         if (linkRegex.test(message.content)) {
-            await message.delete ().catch(() => {});
+            await message.delete().catch(() => {});
             return message.channel.send(`${message.author}, bu sunucuda link paylaşımı yasaktır!`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
         }
     }
 
+    // Davet Engeli
     if (conf.antiinvite) {
         const inviteRegex = /(discord\.(gg|io|me|li)\/|discordapp\.com\/invite\/)/i;
         if (inviteRegex.test(message.content)) {
@@ -614,6 +769,7 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // Caps Limit
     if (conf.capslimit && message.content.length > 5) {
         const caps = message.content.replace(/[^A-Z]/g, '').length;
         if (caps / message.content.length > 0.7) {
@@ -622,11 +778,13 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // Etiket Engeli
     if (conf.antimention && message.mentions.users.size > 5) {
         await message.delete().catch(() => {});
         return message.channel.send(`${message.author}, bir mesajda en fazla 5 kişi etiketleyebilirsiniz!`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
     }
 
+    // Spam Engeli
     if (conf.antispam) {
         const userId = message.author.id;
         const now = Date.now();
@@ -802,5 +960,7 @@ client.on('guildMemberUpdate', async (oldMember, newMember) => {
         }
     }
 });
+
+
 
 client.login(process.env.TOKEN);
