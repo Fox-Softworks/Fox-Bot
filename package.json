@@ -1,7 +1,7 @@
 {
   "name": "fox-bot",
   "version": "2.0.0",
-  "description": "Fox Bot Discor Moderasyon Botu",
+  "description": "Fox Bot — Gelişmiş Moderasyon, Güvenlik, Ekonomi ve AI Destekli Discord Botu | Fox Software",
   "main": "index.js",
   "author": "Muhammed Mustafa Aydoğan <mustafa@fox-software.netlify.app>",
   "license": "MIT",
