@@ -11,10 +11,9 @@ const path = require('path');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const ElevenLabs = require('elevenlabs-node');
 
-// ElevenLabs API anahtarını .env'den çekiyoruz
 const voice = new ElevenLabs({
     apiKey: process.env.ELEVEN_API_KEY, 
-    voiceId: "pNInz6obpg8ndclK7Abv", // İstediğin ses ID'si
+    voiceId: "pNInz6obpg8ndclK7Abv",
 });
 
 let groq;
