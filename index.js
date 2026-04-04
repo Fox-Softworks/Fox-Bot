@@ -8,8 +8,11 @@ const {
 const fs = require('fs');
 const path = require('path');
 
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = require('@discordjs/voice');
 const ElevenLabs = require('elevenlabs-node');
+const { createReadStream } = require('fs');
+
+const ytdl = require('ytdl-core');
 
 const voice = new ElevenLabs({
     apiKey: process.env.ELEVEN_API_KEY, 
@@ -19,9 +22,17 @@ const voice = new ElevenLabs({
 let groq;
 try {
     const Groq = require('groq-sdk');
-    groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+        console.warn("⚠️  GROQ_API_KEY .env dosyasında ayarlanmamış. AI features devre dışı.");
+        groq = null;
+    } else {
+        groq = new Groq({ apiKey });
+        console.log("[✓] Groq SDK başarıyla başlatıldı.");
+    }
 } catch (e) {
-    console.log("Groq SDK yüklü değil.");
+    console.error("❌ Groq SDK yüklü değil veya başlatılamadı:", e?.message);
+    groq = null;
 }
 
 const kufurListesi = ["amk", "aq", "sg", "oç", "orospu", "pic", "piç", "sikerim", "yavşak", "yavsak", "gavat", "ibne", "pezevenk", "yarram", "31", "pornhub"];
@@ -31,7 +42,128 @@ let db = {};
 if (fs.existsSync(dbPath)) {
     db = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
 }
+// Bot Admin Listesi başlat
+if (!db.botAdmins) {
+    db.botAdmins = [];
+}
 const saveDB = () => fs.writeFileSync(dbPath, JSON.stringify(db, null, 4));
+
+// Basit müzik yönetimi: guild bazlı player/connection saklama
+const musicPlayers = new Map();
+
+async function playUrlInGuild(guild, url, requesterId, voiceChannel, textChannel) {
+    if (!db[guild.id]) db[guild.id] = {};
+    if (!db[guild.id].musicQueue) db[guild.id].musicQueue = [];
+
+    // Eğer zaten çalan bir player varsa sıraya ekle
+    const existing = musicPlayers.get(guild.id);
+    if (existing && existing.player.state.status !== AudioPlayerStatus.Idle) {
+        db[guild.id].musicQueue.push({ url, requesterId });
+        saveDB();
+        if (textChannel) textChannel.send(`<@${requesterId}> şarkı sıraya eklendi. Sırada ${db[guild.id].musicQueue.length} şarkı var.`).catch(() => {});
+        return;
+    }
+
+    try {
+        try {
+            // URL validasyonu
+            if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be'))) {
+                if (textChannel) textChannel.send('❌ Geçersiz YouTube URL si.').catch(() => {});
+                return;
+            }
+        } catch (e) {
+            if (textChannel) textChannel.send('❌ Şarkı linki doğrulanamadı.').catch(() => {});
+            return;
+        }
+
+        const connection = joinVoiceChannel({
+            channelId: voiceChannel.id,
+            guildId: guild.id,
+            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: false
+        });
+
+        const player = createAudioPlayer();
+        const ytdlOptions = {
+
+            filter: 'audioonly',
+            quality: 'lowestaudio',
+            highWaterMark: 1 << 25,
+            dlChunkSize: 0
+        };
+
+        let stream;
+        try {
+            stream = ytdl(url, ytdlOptions);
+        } catch (streamErr) {
+            console.error('ytdl stream hatasə:', streamErr?.message);
+            if (textChannel) textChannel.send(`❌ Şarkı indirilemedi: ${streamErr?.message?.substring(0, 100) || 'Bilinmiş hata'}`).catch(() => {});
+            try { connection.destroy(); } catch (e) {}
+            musicPlayers.delete(guild.id);
+            return;
+        }
+
+        // Stream error listener
+        stream.on('error', (err) => {
+            console.error('Stream error:', err?.message);
+            if (textChannel) textChannel.send(`⚠️ Müzik akışı hatası: ${err?.message?.substring(0, 80)}`).catch(() => {});
+            try { connection.destroy(); } catch (e) {}
+            musicPlayers.delete(guild.id);
+        });
+
+        const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+
+        player.play(resource);
+        connection.subscribe(player);
+
+        musicPlayers.set(guild.id, { connection, player });
+
+        if (textChannel) textChannel.send(`🎶 Şimdi çalınıyor: ${url} (istek: <@${requesterId}>)`).catch(() => {});
+
+        player.on(AudioPlayerStatus.Idle, async () => {
+            // Sıradaki varsa devam et
+            const q = db[guild.id].musicQueue || [];
+            if (q.length > 0) {
+                const next = q.shift();
+                saveDB();
+                try {
+                    const nextYtdlOptions = { filter: 'audioonly', quality: 'lowestaudio', highWaterMark: 1 << 25, dlChunkSize: 0 };
+                    const nextStream = ytdl(next.url, nextYtdlOptions);
+                    nextStream.on('error', (err) => {
+                        console.error('Next stream error:', err?.message);
+                        if (textChannel) textChannel.send(`⚠️ Sıradaki şarkıda hata: ${err?.message?.substring(0, 80)}`).catch(() => {});
+                    });
+                    const nextRes = createAudioResource(nextStream, { inputType: StreamType.Arbitrary });
+                    player.play(nextRes);
+                    if (textChannel) textChannel.send(`🎵 Sıradan oynatılıyor: ${next.url} (istek: <@${next.requesterId}>)`).catch(() => {});
+                } catch (e) {
+                    console.error('Sıradaki şarkı oynatılamadı:', e?.message);
+                    if (textChannel) textChannel.send(`❌ Sıradaki şarkı çalınamadı: ${e?.message?.substring(0, 80)}`).catch(() => {});
+                    setTimeout(() => {
+                        try { connection.destroy(); } catch (e) {}
+                        musicPlayers.delete(guild.id);
+                    }, 1000);
+                }
+            } else {
+                setTimeout(() => {
+                    try { connection.destroy(); } catch (e) {}
+                    musicPlayers.delete(guild.id);
+                }, 1000);
+            }
+        });
+
+        player.on('error', error => {
+            console.error('Audio Player Hatası:', error);
+            try { connection.destroy(); } catch (e) {}
+            musicPlayers.delete(guild.id);
+        });
+
+    } catch (err) {
+        console.error('playUrlInGuild hata:', err);
+        if (textChannel) textChannel.send('Şarkı oynatılırken hata oluştu.').catch(() => {});
+    }
+}
 
 const client = new Client({
     intents: [
@@ -52,6 +184,13 @@ const commands = [
     new SlashCommandBuilder().setName('stats').setDescription('Bot istatistiklerini gösterir.'),
     new SlashCommandBuilder().setName('uptime').setDescription('Botun ne kadar süredir aktif olduğunu gösterir.'),
     new SlashCommandBuilder().setName('shardinfo').setDescription('Shard bilgilerini gösterir.'),
+
+    new SlashCommandBuilder().setName('setadmin').setDescription('Bir kullanıcıyı bot yöneticisi yapar (Sadece bot sahibi).')
+        .addUserOption(o => o.setName('kullanici').setDescription('Yönetici yapılacak kullanıcı').setRequired(true)),
+    new SlashCommandBuilder().setName('removeadmin').setDescription('Bir kullanıcının bot yöneticisini kaldırır (Sadece bot sahibi).')
+        .addUserOption(o => o.setName('kullanici').setDescription('Yönetici kaldırılacak kullanıcı').setRequired(true)),
+    new SlashCommandBuilder().setName('admins').setDescription('Bot yöneticilerinin listesini gösterir.'),
+    new SlashCommandBuilder().setName('adminpanel').setDescription('Yönetim paneline erişir (Sadece admin).'),
 
     new SlashCommandBuilder().setName('mute').setDescription('Kullanıcıyı susturur.')
         .addUserOption(o => o.setName('kullanici').setDescription('Susturulacak kullanıcı').setRequired(true))
@@ -119,6 +258,14 @@ const commands = [
     new SlashCommandBuilder().setName('capslimit').setDescription('Büyük harf kullanım sınırını açar/kapatır.')
         .addBooleanOption(o => o.setName('durum').setDescription('Aktif mi?').setRequired(true)),
 
+    new SlashCommandBuilder().setName('blockword').setDescription('Engelli kelime ekler/kaldırır (Admin).')
+        .addStringOption(o => o.setName('islem').setDescription('Ekle veya Sil').setRequired(true)
+            .addChoices({name: 'Ekle', value: 'ekle'}, {name: 'Sil', value: 'sil'}, {name: 'Listele', value: 'listele'})
+        )
+        .addStringOption(o => o.setName('kelime').setDescription('Kelime (Listele için opsiyonel)')),
+    new SlashCommandBuilder().setName('setyavaslas').setDescription('Sunucu hakkında otomatik mesaj ayarlar (Admin).')
+        .addStringOption(o => o.setName('kanal').setDescription('Kanal ID (Kaldırmak için "sil")').setRequired(true)),
+
     new SlashCommandBuilder().setName('ticket_setup').setDescription('Ticket sistemini kurar.'),
     new SlashCommandBuilder().setName('verification').setDescription('Doğrulama (Kayıt) sistemini kurar.')
         .addRoleOption(o => o.setName('verilecek_rol').setDescription('Doğrulanınca verilecek rol').setRequired(true)),
@@ -126,7 +273,7 @@ const commands = [
         .addChannelOption(o => o.setName('kanal').setDescription('Kanal').addChannelTypes(ChannelType.GuildText)),
     new SlashCommandBuilder().setName('goodbye').setDescription('Görüşürüz mesajı kanalını ayarlar.')
         .addChannelOption(o => o.setName('kanal').setDescription('Kanal').addChannelTypes(ChannelType.GuildText)),
-    new SlashCommandBuilder().setName('setprefix').setDescription('Slash komutları olduğu için prefix kullanılmaz, sadece bilgi amaçlıdır.'),
+    new SlashCommandBuilder().setName('setprefix').setDescription('Sunucu mesaj prefixini ayarlar.').addStringOption(o => o.setName('prefix').setDescription('Yeni prefix').setRequired(true)),
     
     new SlashCommandBuilder().setName('sunucukur').setDescription('Sunucuyu profesyonel bir şekilde otomatik kurar.')
         .addStringOption(o => o.setName('tema').setDescription('Kurulacak tema').setRequired(true)
@@ -140,12 +287,22 @@ const commands = [
     new SlashCommandBuilder().setName('selamla').setDescription('Bot belirtilen kullanıcıyı selamlar.')
         .addUserOption(o => o.setName('kisi').setDescription('Selamlanacak kişi').setRequired(true)),
     new SlashCommandBuilder().setName('seslendir').setDescription('Yazdığınız metni sesli kanalda okur.')
-    .addStringOption(o => o.setName('metin').setDescription('Okunacak metin').setRequired(true)),
+        .addStringOption(o => o.setName('metin').setDescription('Okunacak metin').setRequired(true)),
 ];
 
 const checkPerm = (interaction, perm) => {
     if (!interaction.member.permissions.has(perm)) {
         interaction.reply({ content: 'Bu komutu kullanmak için yeterli yetkiniz yok.', ephemeral: true });
+        return false;
+    }
+    return true;
+};
+
+// Bot Admin Kontrolü
+const checkBotAdmin = (interaction) => {
+    const botAdmins = db.botAdmins || [];
+    if (!botAdmins.includes(interaction.user.id) && interaction.user.id !== process.env.BOT_OWNER) {
+        interaction.reply({ content: '❌ Bu komutu kullanmak için bot yöneticisi olmalısın.', ephemeral: true });
         return false;
     }
     return true;
@@ -180,7 +337,7 @@ const sendModLog = async (guild, action, target, moderator, reason) => {
     // 🔥 Eğer kesildiyse TAM halini ayrı mesaj olarak at
     if (reason && reason.length > 1000) {
         const chunks = [];
-        for (let i = 0; i < reason.length; i += 4000) {
+        for (let i = 0; i < reason.length; i += 4000) { 
             chunks.push(reason.slice(i, i + 4000));
         }
 
@@ -258,20 +415,155 @@ client.on('interactionCreate', async interaction => {
         switch (commandName) {
             case 'yardim': {
                 const helpEmbed = new EmbedBuilder()
-                    .setColor('Blue')
-                    .setTitle('Bot Komutları')
-                    .setDescription('Aşağıda kullanabileceğiniz komutların listesi bulunmaktadır.')
+                    .setColor('#7289DA')
+                    .setTitle('🤖 Fox Bot - Komut Rehberi')
+                    .setDescription('Tüm özellikleri ve bunları nasıl kullanacağını öğren.\n\n' +
+                        '**Slash Komutları:** `/komut` şeklinde kullanılır\n' +
+                        '**Mesaj Komutları:** Mesajda belirtilen kelimeler\n' +
+                        '**Prefix:** Özel prefixler kullanılabilir')
                     .addFields(
-                        { name: '🛠️ Moderasyon', value: '`/mute`, `/unmute`, `/kick`, `/ban`, `/purge`, `/clear`' },
-                        { name: 'ℹ️ Bilgi', value: '`/avatar`, `/banner`, `/userinfo`, `/roleinfo`, `/serverinfo`' },
-                        { name: '🎭 Rol', value: '`/addrole`, `/removerole`, `/lockrole`, `/autorole`' },
-                        { name: '📋 Log', value: '`/modlog`, `/leavelog`, `/joinlog`, `/editlog`, `/messagelog`, `/setlog`' },
-                        { name: '🛡️ Güvenlik', value: '`/antimention`, `/antiraid`, `/antibot`, `/antilink`, `/antispam`, `/antiinvite`, `/capslimit`' },
-                        { name: '⚙️ Sistem', value: '`/ticket_setup`, `/verification`, `/welcome`, `/goodbye`, `/setprefix`, `/sunucukur`, `/reset`' },
-                        { name: '✨ Eğlence & Diğer', value: '`/motivasyon`, `/tkm`, `/mesaj`, `/selamla`' }
+                        { 
+                            name: '🎙️ SES & MÜZİK & AI', 
+                            value: '📖 **AI Sohbet:** `fox bot <soru>` - Yapay zekayla sohbet et\n' +
+                                '🎙️ **Seslendir:** `/seslendir <metin>` - Metni sesle sitesi kanalında oku (AI sesi ile)\n' +
+                                '📍 **Sese Gel:** `sese gel` - Bota bulunduğun ses kanalına bağlan\n' +
+                                '🎵 **Müzik:** YouTube linki yaz - Otomatik olarak şarkı çal\n' +
+                                '📌 **Not:** Seslendir özelliği için bot ses kanalında olmalı',
+                            inline: false 
+                        },
+                        { 
+                            name: '🛠️ MODERASYON & YÖNETIM', 
+                            value: '**Mute:** `/mute <kullanıcı> <dakika> [sebep]` - Kullanıcıyı sus\n' +
+                                '**Unmute:** `/unmute <kullanıcı>` - Susturmayı kaldır\n' +
+                                '**Kick:** `/kick <kullanıcı> [sebep]` - Sunucudan at\n' +
+                                '**Ban:** `/ban <kullanıcı> [sebep]` - Sunucudan yasakla\n' +
+                                '**Purge/Clear:** `/purge <sayı>` - Mesaj sil (1-100)\n' +
+                                '📌 **Gerekli İzin:** Moderasyon İzni', 
+                            inline: false 
+                        },
+                        { 
+                            name: '🎭 ROL YÖNETIMI', 
+                            value: '**Rol Ver:** `/addrole <kullanıcı> <rol>` - Kullanıcıya rol ekle\n' +
+                                '**Rol Al:** `/removerole <kullanıcı> <rol>` - Kullanıcıdan rol çıkar\n' +
+                                '**Rol Kilidi:** `/lockrole <rol>` - Rolü bahsedilebilir/bahsedilemez yap\n' +
+                                '**Oto-Rol:** `/autorole [rol]` - Sunucuya katılanlara otomatik rol\n' +
+                                '📌 **Gerekli İzin:** Rol Yönetimi',
+                            inline: false 
+                        },
+                        { 
+                            name: 'ℹ️ BİLGİ & İSTATİSTİK', 
+                            value: '**Avatar:** `/avatar [kullanıcı]` - Profil fotoğrafını göster\n' +
+                                '**Banner:** `/banner [kullanıcı]` - Kişinin afişini göster\n' +
+                                '**Kullanıcı Info:** `/userinfo [kullanıcı]` - Öğrenci bilgileri\n' +
+                                '**Rol Info:** `/roleinfo <rol>` - Rol detayları\n' +
+                                '**Sunucu Info:** `/serverinfo` - Sunucu istatistikleri\n' +
+                                '**Ping:** `/ping` - Bot gecikmesini göster\n' +
+                                '**Stats:** `/stats` - Bot istatistikleri\n' +
+                                '**Uptime:** `/uptime` - Kaç süredir aktif',
+                            inline: false 
+                        },
+                        { 
+                            name: '📋 LOG & İZLEME SİSTEMİ', 
+                            value: '**Modlog:** `/modlog <kanal>` - Moderasyon logları\n' +
+                                '**Joinlog:** `/joinlog <kanal>` - Sunucuya girmeler\n' +
+                                '**Leavelog:** `/leavelog <kanal>` - Çıkışlar\n' +
+                                '**Messagelog:** `/messagelog <kanal>` - Silinen mesajlar\n' +
+                                '**Editlog:** `/editlog <kanal>` - Düzenlenen mesajlar\n' +
+                                '**Tümünü Ayarla:** `/setlog <kanal>` - Tüm logları bir kanala\n' +
+                                '📌 **Gerekli İzin:** Admin',
+                            inline: false 
+                        },
+                        { 
+                            name: '🛡️ GÜVENLİK SİSTEMLERİ', 
+                            value: '**Antimention:** `/antimention <durum>` - Toplu etiketleme engelle\n' +
+                                '**Antiraid:** `/antiraid <durum>` - Ani giriş salını engelle\n' +
+                                '**Antibot:** `/antibot <durum>` - Bot eklenmesini engelle\n' +
+                                '**Antilink:** `/antilink <durum>` - Link paylaşımını engelle\n' +
+                                '**Antispam:** `/antispam <durum>` - Spam mesajlara karşı\n' +
+                                '**Antiinvite:** `/antiinvite <durum>` - Discord davet engelle\n' +
+                                '**Capslimit:** `/capslimit <durum>` - Büyük harf sınırla\n' +
+                                '**Engelli Kelimeler:** `/blockword <ekle/sil/listele> [kelime]` - Küfür ve yasak kelimeler',
+                            inline: false 
+                        },
+                        { 
+                            name: '⚙️ SİSTEM & KURULUM', 
+                            value: '**Ticket Sistemi:** `/ticket_setup` - Destek tiketi sistemi\n' +
+                                '**Doğrulama:** `/verification <rol>` - Kayıt sistemi\n' +
+                                '**Hoş Geldin:** `/welcome <kanal>` - Giriş mesajı\n' +
+                                '**Görüşürüz:** `/goodbye <kanal>` - Çıkış mesajı\n' +
+                                '**Prefix:** `/setprefix <prefix>` - Mesaj komut prefixi\n' +
+                                '**Sunucu Kur:** `/sunucukur <tema>` - Otomatik sunucu yapısı\n' +
+                                '**Sıfırla:** `/reset` - Tüm ayarları sıfırla\n' +
+                                '📌 **Gerekli İzin:** Admin',
+                            inline: false 
+                        },
+                        { 
+                            name: '🎉 EĞLENCE KOMUTLARI', 
+                            value: '**Motivasyon:** `/motivasyon` - Motivasyon sözü\n' +
+                                '**Taş Kağıt Makas:** `/tkm <tas|kagit|makas>` - Oyun oyna\n' +
+                                '**Mesaj:** `/mesaj <metin>` - Bota kendi mesajını yaz\n' +
+                                '**Selamla:** `/selamla <kişi>` - Birini selamla\n' +
+                                '✨ **Eğlenceli komutlar, herkes tarafından kullanılabilir',
+                            inline: false 
+                        },
+                        { 
+                            name: '👑 ADMIN KOMUTLARI', 
+                            value: '**Admin Ata:** `/setadmin <kullanıcı>` - Bot yöneticisi yap\n' +
+                                '**Admin Çıkar:** `/removeadmin <kullanıcı>` - Bot yöneticiliği kaldır\n' +
+                                '**Adminler:** `/admins` - Bot yöneticileri listesi\n' +
+                                '**Admin Panel:** `/adminpanel` - Yönetim paneline erişim\n' +
+                                '📌 **Sadece Bot Sahibi ve Yöneticileri**',
+                            inline: false 
+                        }
                     )
-                    .setFooter({ text: '🧑‍💻 MustafaDev, Fox Software Tarafından Tasarlandı' });
-                await interaction.reply({ embeds: [helpEmbed] });
+                    .addFields(
+                        { 
+                            name: '\n📌 HIZLI İPUÇLARI & ÖNEMLİ BİLGİLER', 
+                            value: '💡 **Seslendir için:** Bot ses kanalında olmalı ve dosya /tmp klasöründe yazılabilir olmalı\n' +
+                                '💡 **YouTube Müzik:** Direkt YouTube linki yapıştır, otomatik başlar\n' +
+                                '💡 **Admin Kontrol:** Yönetim komutları sadece bot yöneticileri tarafından\n' +
+                                '💡 **Loglar:** Ayarlandığında otomatik olarak kaydedilir\n' +
+                                '💡 **Tüm Slash komutları:** `/` ile başlar\n' +
+                                '💡 **Hata varsa:** Yöneticiye bildir',
+                            inline: false 
+                        }
+                    )
+                    .setFooter({ text: 'Fox Software © 2024 | Prefix: ' + (db[guild.id]?.prefix || '?'), iconURL: guild.iconURL() })
+                    .setTimestamp();
+
+                try {
+                    await interaction.reply({ embeds: [helpEmbed] });
+                } catch (err) {
+                    console.error('Yardım komutu hatası:', err);
+                    const helpText = [
+                        '**🤖 FOX BOT KOMUT REHBERI**',
+                        '',
+                        '**VOICEAI:** `fox bot <soru>` - Yapay zekayla sohbet\n**Seslendir:** `/seslendir <metin>` - Metni sesle oku\n**Müzik:** YouTube linki yapıştır\n**Sese Gel:** `sese gel`',
+                        '',
+                        '**MODERASYON:** `/mute` `/kick` `/ban` `/purge`',
+                        '',
+                        '**ROLLER:** `/addrole` `/removerole` `/lockrole` `/autorole`',
+                        '',
+                        '**LOG:** `/modlog` `/joinlog` `/leavelog` `/editlog` `/messagelog`',
+                        '',
+                        '**GÜVENLİK:** `/antimention` `/antiraid` `/antibot` `/antilink` `/antispam` `/antiinvite` `/capslimit` `/blockword`',
+                        '',
+                        '**ADMIN:** `/setadmin` `/removeadmin` `/admins` `/adminpanel`',
+                        '',
+                        'Detaylı bilgi için: `/yardim`'
+                    ].join('\n');
+
+                    try {
+                        if (interaction.replied || interaction.deferred) {
+                            await interaction.followUp({ content: helpText, ephemeral: true });
+                        } else {
+                            await interaction.reply({ content: helpText, ephemeral: true });
+                        }
+                    } catch (err2) {
+                        console.error('Yardım fallback gönderilemedi:', err2);
+                    }
+                }
+
                 break;
             }
             case 'ping':
@@ -514,9 +806,14 @@ client.on('interactionCreate', async interaction => {
                 await interaction.reply({ content: 'Doğrulama sistemi kuruldu.', ephemeral: true });
                 break;
             }
-            case 'setprefix':
-                await interaction.reply('Bu bot tamamen Slash (/) komutları kullanmaktadır. Prefix ayarlamanıza gerek yoktur.');
+            case 'setprefix': {
+                if (!checkPerm(interaction, PermissionsBitField.Flags.Administrator)) return;
+                const newPrefix = options.getString('prefix');
+                db[guildId].prefix = newPrefix;
+                saveDB();
+                await interaction.reply({ content: `Prefix başarıyla '${newPrefix}' olarak ayarlandı. Mesaj komutları için bu prefiksi kullanın.`, ephemeral: true });
                 break;
+            }
 
             case 'sunucukur': {
                 if (!checkPerm(interaction, PermissionsBitField.Flags.Administrator)) return;
@@ -635,18 +932,142 @@ client.on('interactionCreate', async interaction => {
                 break;
             }
 
+            // ====== ADMIN KOMUTLARI ======
+            case 'setadmin': {
+                // Sadece bot sahibi ve mevcut adminler
+                const botAdmins = db.botAdmins || [];
+                if (!botAdmins.includes(interaction.user.id) && interaction.user.id !== process.env.BOT_OWNER) {
+                    return interaction.reply({ content: '❌ Sadece bot sahibi bu komutu kullanabilir.', ephemeral: true });
+                }
+                const target = options.getUser('kullanici');
+                if (!db.botAdmins) db.botAdmins = [];
+                if (db.botAdmins.includes(target.id)) {
+                    return interaction.reply({ content: `${target.tag} zaten bot yöneticisi.`, ephemeral: true });
+                }
+                db.botAdmins.push(target.id);
+                saveDB();
+                await interaction.reply(`✅ ${target.tag} bot yöneticisi olarak eklendi.`);
+                break;
+            }
+            case 'removeadmin': {
+                const botAdmins = db.botAdmins || [];
+                if (!botAdmins.includes(interaction.user.id) && interaction.user.id !== process.env.BOT_OWNER) {
+                    return interaction.reply({ content: '❌ Sadece bot sahibi bu komutu kullanabilir.', ephemeral: true });
+                }
+                const target = options.getUser('kullanici');
+                if (!db.botAdmins || !db.botAdmins.includes(target.id)) {
+                    return interaction.reply({ content: `${target.tag} bot yöneticisi değil.`, ephemeral: true });
+                }
+                db.botAdmins = db.botAdmins.filter(id => id !== target.id);
+                saveDB();
+                await interaction.reply(`✅ ${target.tag} bot yöneticiliği kaldırıldı.`);
+                break;
+            }
+            case 'admins': {
+                const botAdmins = db.botAdmins || [];
+                if (botAdmins.length === 0) {
+                    return interaction.reply('Henüz bot yöneticisi tanımlanmamış.');
+                }
+                const adminList = botAdmins.map(id => `<@${id}> (${id})`).join('\n');
+                const embed = new EmbedBuilder()
+                    .setTitle('👑 Bot Yöneticileri')
+                    .setDescription(adminList)
+                    .setColor('Gold')
+                    .setFooter({ text: 'Toplam: ' + botAdmins.length });
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
+            case 'adminpanel': {
+                // Admin kontrol
+                const botAdmins = db.botAdmins || [];
+                if (!botAdmins.includes(interaction.user.id) && interaction.user.id !== process.env.BOT_OWNER) {
+                    return interaction.reply({ content: '❌ Sadece bot yöneticileri bu panele erişebilir.', ephemeral: true });
+                }
+                const guildConf = db[guildId] || {};
+                const embed = new EmbedBuilder()
+                    .setTitle('⚙️ Admin Yönetim Paneli')
+                    .setColor('Purple')
+                    .addFields(
+                        { name: 'Sunucu ID', value: guildId, inline: true },
+                        { name: 'Modlog Kanalı', value: guildConf.modlog ? `<#${guildConf.modlog}>` : 'Ayarlanmamış', inline: true },
+                        { name: 'Join Log', value: guildConf.joinlog ? `<#${guildConf.joinlog}>` : 'Ayarlanmamış', inline: true },
+                        { name: 'Anti-Mention', value: guildConf.antimention ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Anti-Raid', value: guildConf.antiraid ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Anti-bot', value: guildConf.antibot ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Anti-Link', value: guildConf.antilink ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Anti-Spam', value: guildConf.antispam ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Anti-Invite', value: guildConf.antiinvite ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Caps Limit', value: guildConf.capslimit ? '✅ Aktif' : '❌ Pasif', inline: true },
+                        { name: 'Oto-Rol', value: guildConf.autorole ? `<@&${guildConf.autorole}>` : 'Ayarlanmamış', inline: true },
+                        { name: 'Engelli Kelimeler', value: (guildConf.blockWords?.length || 0) + ' kelime', inline: true }
+                    )
+                    .setFooter({ text: 'Fox Software Admin Panel' })
+                    .setTimestamp();
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+                break;
+            }
+
+            case 'blockword': {
+                if (!checkBotAdmin(interaction)) return;
+                const islem = options.getString('islem');
+                const kelime = options.getString('kelime');
+
+                if (!db[guildId].blockWords) db[guildId].blockWords = [];
+
+                if (islem === 'ekle') {
+                    if (!kelime) return interaction.reply({ content: 'Eklemek için kelime belirt.', ephemeral: true });
+                    if (db[guildId].blockWords.includes(kelime.toLowerCase())) {
+                        return interaction.reply({ content: 'Bu kelime zaten engelli.', ephemeral: true });
+                    }
+                    db[guildId].blockWords.push(kelime.toLowerCase());
+                    saveDB();
+                    await interaction.reply(`✅ "${kelime}" engelli kelimeler listesine eklendi.`);
+                } else if (islem === 'sil') {
+                    if (!kelime) return interaction.reply({ content: 'Silmek için kelime belirt.', ephemeral: true });
+                    const index = db[guildId].blockWords.indexOf(kelime.toLowerCase());
+                    if (index === -1) return interaction.reply({ content: 'Bu kelime engelli değil.', ephemeral: true });
+                    db[guildId].blockWords.splice(index, 1);
+                    saveDB();
+                    await interaction.reply(`✅ "${kelime}" engelli kelimeler listesinden çıkarıldı.`);
+                } else if (islem === 'listele') {
+                    if (db[guildId].blockWords.length === 0) {
+                        return interaction.reply('Engelli kelime yok.');
+                    }
+                    const list = db[guildId].blockWords.join(', ');
+                    const safeList = list.length > 1024 ? list.substring(0, 1021) + '...' : list;
+                    const embed = new EmbedBuilder()
+                        .setTitle('📋 Engelli Kelimeler')
+                        .setDescription(safeList)
+                        .setColor('Red')
+                        .setFooter({ text: 'Toplam: ' + db[guildId].blockWords.length });
+                    await interaction.reply({ embeds: [embed] });
+                }
+                break;
+            }
+
             case 'seslendir': {
                 const metin = options.getString('metin');
                 const voiceChannel = member.voice.channel;
 
                 if (!voiceChannel) return interaction.reply({ content: 'Önce bir ses kanalına girmelisin!', ephemeral: true });
 
-                await interaction.deferReply();
-
+                // Defer reply güvenli şekilde yapılır
+                let deferred = false;
+                try {
+                    await interaction.deferReply();
+                    deferred = true;
+                } catch (e) {
+                    console.warn('deferReply başarısız:', e?.message || e);
+                }
                 try {
                     const fileName = path.join(__dirname, `ses_${user.id}.mp3`);
 
+                    if (!process.env.ELEVEN_API_KEY) {
+                        throw new Error('❌ ElevenLabs API key yüklü değil.');
+                    }
+
                     // 1. ElevenLabs üzerinden sesi oluştur
+                    console.log(`[TTS] Generating for voiceId: ${voice.voiceId || 'unknown'}`);
                     await voice.textToSpeech({
                         fileName: fileName,
                         textInput: metin,
@@ -654,39 +1075,72 @@ client.on('interactionCreate', async interaction => {
                         similarityBoost: 0.5,
                         modelId: "eleven_multilingual_v2"
                     });
+                    console.log(`[TTS] File saved: ${fileName}`);
 
                     // 2. Ses kanalına bağlan
                     const connection = joinVoiceChannel({
                         channelId: voiceChannel.id,
                         guildId: guild.id,
                         adapterCreator: guild.voiceAdapterCreator,
+                        selfDeaf: false,
+                        selfMute: false
                     });
 
                     const player = createAudioPlayer();
-                    const resource = createAudioResource(fileName);
+                    
+                    // FIX: createReadStream kullanarak dosyayı oku
+                    const audioStream = createReadStream(fileName);
+                    const resource = createAudioResource(audioStream, { inputType: StreamType.Arbitrary });
 
                     player.play(resource);
                     connection.subscribe(player);
 
-                    await interaction.editReply(`🎙️ **"${metin}"** cümlesi seslendiriliyor...`);
+                    if (deferred) {
+                        await interaction.editReply(`🎙️ **"${metin.substring(0, 50)}${metin.length > 50 ? '...' : ''}"** seslendiriliyor...`);
+                    } else {
+                        try { await interaction.reply(`🎙️ **"${metin.substring(0, 50)}${metin.length > 50 ? '...' : ''}"** seslendiriliyor...`); } catch (e) { console.warn('reply başarısız:', e?.message || e); }
+                    }
 
                     // 3. Ses bitince kanaldan çık ve dosyayı sil
                     player.on(AudioPlayerStatus.Idle, () => {
                         setTimeout(() => {
-                            connection.destroy();
-                            if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+                            try {
+                                connection.destroy();
+                            } catch (e) {}
+                            if (fs.existsSync(fileName)) {
+                                try {
+                                    fs.unlinkSync(fileName);
+                                } catch (e) { console.warn('Dosya silme hatası:', e); }
+                            }
                         }, 1000);
                     });
 
                     player.on('error', error => {
                         console.error('Audio Player Hatası:', error);
-                        connection.destroy();
-                        if (fs.existsSync(fileName)) fs.unlinkSync(fileName);
+                        try {
+                            connection.destroy();
+                        } catch (e) {}
+                        if (fs.existsSync(fileName)) {
+                            try {
+                                fs.unlinkSync(fileName);
+                            } catch (e) {}
+                        }
                     });
 
                 } catch (error) {
-                    console.error('Seslendirme Hatası:', error);
-                    await interaction.editReply('Seslendirme yapılırken bir hata oluştu. API anahtarını ve kotanı kontrol et.');
+                    console.error('Seslendirme Hatası:', error?.message || error);
+                    const errorMsg = error?.response?.status === 404 
+                        ? '❌ ElevenLabs API hatası: voiceId veya API key geçersiz.' 
+                        : error?.message?.includes('401') 
+                        ? '❌ ElevenLabs API anahtarı geçersiz.'
+                        : '❌ Seslendirme yapılırken hata oluştu. API anahtarını veya ses dosyası yazmak için izinleri kontrol et.';
+                    try { 
+                        if (deferred) {
+                            await interaction.editReply(errorMsg);
+                        } else {
+                            await interaction.reply(errorMsg);
+                        }
+                    } catch (e) { console.warn('editReply/reply başarısız:', e?.message || e); }
                 }
                 break;
             }
@@ -694,9 +1148,26 @@ client.on('interactionCreate', async interaction => {
     } catch (error) {
         console.error(error);
         const reply = { content: 'Komut çalıştırılırken bir hata oluştu.', ephemeral: true };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(reply);
-        else await interaction.reply(reply);
+        try {
+            if (interaction && (interaction.replied || interaction.deferred)) {
+                await interaction.followUp(reply).catch(e => console.warn('followUp başarısız:', e?.message || e));
+            } else if (interaction) {
+                await interaction.reply(reply).catch(e => console.warn('reply başarısız:', e?.message || e));
+            } else {
+                console.warn('Interaction nesnesi mevcut değil, cevap gönderilemedi.');
+            }
+        } catch (e) {
+            console.error('Hata cevabı gönderilemedi:', e);
+        }
     }
+});
+
+// Global hata yakalayıcılar - çöküşleri engelle ve logla
+process.on('unhandledRejection', (reason, p) => {
+    console.error('Unhandled Rejection at:', p, 'reason:', reason);
+});
+process.on('uncaughtException', err => {
+    console.error('Uncaught Exception:', err);
 });
 
 const userMessageCache = new Map();
@@ -708,6 +1179,15 @@ client.on('messageCreate', async message => {
 
     const lowerMessage = message.content.toLowerCase();
 
+    // Engelli Kelimeler Kontrolü
+    if (conf.blockWords && conf.blockWords.length > 0) {
+        const hasBlockedWord = conf.blockWords.some(word => lowerMessage.includes(word));
+        if (hasBlockedWord && !message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
+            await message.delete().catch(() => {});
+            return message.channel.send(`❌ Bu kelimeleri kullanamazsın! <@${message.author.id}>`).then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+        }
+    }
+
     // Küfür filtresi
     const hasKufur = kufurListesi.some(word => lowerMessage.includes(word));
     if (hasKufur) {
@@ -717,34 +1197,123 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // Mesaj tabanlı müzik komutları ve YouTube algılama
+    const ytRegex = /(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)[^\s]+)/i;
+    const ytMatch = message.content.match(ytRegex);
+
+    const trimmed = lowerMessage.trim();
+
+    // 'sese gel' -> yazarın bulunduğu ses kanalına bağlan
+    if (trimmed === 'sese gel') {
+        const voiceChannel = message.member?.voice?.channel;
+        if (!voiceChannel) return message.reply('Önce bir ses kanalına girmen gerekiyor.');
+        const perms = voiceChannel.permissionsFor ? voiceChannel.permissionsFor(client.user) : null;
+        if (!perms || !perms.has(PermissionsBitField.Flags.Connect) || !perms.has(PermissionsBitField.Flags.Speak)) {
+            return message.reply('Ses kanalına bağlanma veya konuşma iznim yok.');
+        }
+        try {
+            joinVoiceChannel({ channelId: voiceChannel.id, guildId: message.guild.id, adapterCreator: voiceChannel.guild.voiceAdapterCreator, selfDeaf: false, selfMute: false });
+            return message.reply('Ses kanalına bağlandım.');
+        } catch (e) {
+            console.error('Sese gel hatası:', e);
+            return message.reply('Sese bağlanırken hata oluştu.');
+        }
+    }
+
+    // Play komutları: eğer mesajda YouTube linki varsa ve yazan veya etiketlenen birinin ses kanalında varsa çal
+    if (ytMatch) {
+        const url = ytMatch[0];
+
+        // Kullanıcı etiketlendiyse onun ses kanalına bağlan, yoksa mesajı atan kişinin ses kanalına
+        const mentionedUser = message.mentions.users.first();
+        let targetVoiceChannel = null;
+        if (mentionedUser) {
+            const member = message.guild.members.cache.get(mentionedUser.id);
+            targetVoiceChannel = member?.voice?.channel;
+        }
+        if (!targetVoiceChannel) targetVoiceChannel = message.member?.voice?.channel;
+
+        if (!targetVoiceChannel) return message.reply('Şarkıyı çalabilmem için önce bir ses kanalına gir veya bir kullanıcı etiketle.');
+
+        const perms = targetVoiceChannel.permissionsFor ? targetVoiceChannel.permissionsFor(client.user) : null;
+        if (!perms || !perms.has(PermissionsBitField.Flags.Connect) || !perms.has(PermissionsBitField.Flags.Speak)) {
+            return message.reply('Ses kanalına bağlanma veya konuşma iznim yok.');
+        }
+
+        await message.react('🎵').catch(() => {});
+        return playUrlInGuild(message.guild, url, message.author.id, targetVoiceChannel, message.channel);
+    }
+
     // Fox Bot AI Sohbet
     if (lowerMessage.startsWith('fox bot')) {
-        if (!groq) return message.reply("Groq API anahtarım bağlı değil, sana cevap veremiyorum.");
         const userPrompt = message.content.substring(7).trim();
-        if (!userPrompt) return message.reply("Efendim? Benimle konuşmak için 'fox bot merhaba' gibi bir şey yazabilirsin.");
+        
+        if (!userPrompt) return message.reply("Efendim? 'fox bot merhaba' gibi bir soru sor. ✨");
 
-        let systemPrompt = '';
+        // .env kontrolü
+        if (!process.env.GROQ_API_KEY) {
+            console.error('[AI] GROQ_API_KEY not found in .env');
+            return message.reply("❌ GROQ_API_KEY .env dosyasında ayarlanmamış. Yöneticiye bildirin.");
+        }
+
+        // Groq SDK kontrolü
+        if (!groq) {
+            console.error('[AI] Groq SDK not initialized');
+            return message.reply("❌ Groq SDK başlatılamadı. Yöneticiye bildirin.");
+        }
+
+        let systemPrompt = "Sen Fox Bot adında yardımsever bir Discord botusun. Türkçe konuş, kısa ve bilgilendirici ol.";
         try {
-            systemPrompt = fs.readFileSync(path.join(__dirname, 'systemprompt.txt'), 'utf-8');
+            const customPrompt = fs.readFileSync(path.join(__dirname, 'systemprompt.txt'), 'utf-8').trim();
+            if (customPrompt) systemPrompt = customPrompt;
         } catch (err) {
-            console.error("System prompt okunamadı:", err);
-            systemPrompt = "Sen Fox Bot adında yardımsever bir Discord botusun.";
+            // systemprompt.txt yoksa varsayılan kullan
         }
 
         try {
+            console.log(`[AI] Incoming: "${userPrompt.substring(0, 50)}..."`);
             await message.channel.sendTyping();
+            
             const completion = await groq.chat.completions.create({
                 model: 'llama-3.1-8b-instant',
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt }
-                ]
+                ],
+                temperature: 0.7,
+                max_tokens: 500,
+                top_p: 0.9
             });
-            const cevap = completion.choices[0]?.message?.content || 'Üzgünüm, şu an bağlantı kuramıyorum.';
+            
+            const cevap = completion.choices[0]?.message?.content?.trim();
+            if (!cevap) {
+                console.error('[AI] Empty response from Groq');
+                return message.reply("Cevap üretilemiyor. Daha sonra dene.");
+            }
+            
+            console.log(`[AI] Response: "${cevap.substring(0, 50)}..."`);
+            if (cevap.length > 2000) return message.reply(cevap.substring(0, 1997) + '...');
             return message.reply(cevap);
+            
         } catch (err) {
-            console.error("Groq Hatası:", err);
-            return message.reply("Sanırım devrelerim biraz karıştı, daha sonra tekrar dener misin?");
+            console.error('[AI] Error:', err?.status || err?.code, err?.message);
+            
+            // Spesifik hata mesajları
+            if (err?.status === 401 || err?.message?.includes('401')) {
+                return message.reply("❌ Groq API key geçersiz. Yönetici kontrol etsin.");
+            }
+            if (err?.status === 429 || err?.message?.includes('429')) {
+                return message.reply("⏱️ Çok hızlı sordu. Biraz bekle ve tekrar dene.");
+            }
+            if (err?.status === 500 || err?.message?.includes('500')) {
+                return message.reply("⚠️ Groq servisi şu an çalışmıyor. Biraz sonra dene.");
+            }
+            if (err?.message?.includes('ERR_MODULE_NOT_FOUND')) {
+                console.error('[AI] Groq module not found - needs installation');
+                return message.reply("❌ Groq SDK kurulu değil. Bot yeniden başlatmayı doneyin.");
+            }
+            
+            return message.reply(`❌ Hata: ${err?.message?.substring(0, 100) || 'Bilinmiş hata'}`);
         }
     }
 
