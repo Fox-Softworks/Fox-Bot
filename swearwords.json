@@ -1,0 +1,51 @@
+{
+  "enabled": true,
+  "swearwords": [
+    "amk",
+    "aq",
+    "sg",
+    "oç",
+    "orospu",
+    "pic",
+    "piç",
+    "sikerim",
+    "yavşak",
+    "yavsak",
+    "gavat",
+    "ibne",
+    "pezevenk",
+    "yarram",
+    "31",
+    "pornhub"
+  ],
+  "descriptions": {
+    "amk": "Orta seviye küfür",
+    "aq": "Orta seviye küfür",
+    "sg": "Orta seviye küfür",
+    "oç": "Ağır küfür",
+    "orospu": "Ağır küfür",
+    "pic": "Orta seviye küfür",
+    "piç": "Orta seviye küfür",
+    "sikerim": "Ağır küfür",
+    "yavşak": "Orta seviye küfür",
+    "yavsak": "Orta seviye küfür",
+    "gavat": "Orta seviye küfür",
+    "ibne": "Ağır küfür",
+    "pezevenk": "Ağır küfür",
+    "yarram": "Ağır küfür",
+    "31": "Orta seviye küfür",
+    "pornhub": "Ağır küfür"
+  },
+  "punishments": {
+    "Orta seviye küfür": {
+      "warning": true,
+      "mute": false,
+      "muteDuration": 0
+    },
+    "Ağır küfür": {
+      "warning": true,
+      "mute": true,
+      "muteDuration": 5
+    }
+  }
+}
