@@ -309,8 +309,8 @@ Projeye katkıda bulunmak için pull request gönderebilir, hata bildirimlerini 
 
 ## 📞 Destek
 
-Sorularınız için Discord sunucumuza katılın: [Discord Bağlantısı](https://discord.gg/gDQm7kvB)
+Sorularınız için Discord sunucumuza katılın: [Discord Bağlantısı](https://discord.gg/mYq23y5GAR)
 
 ---
 
-*Son Güncelleme: Mart 2026*
+*Son Güncelleme: Mayıs 2026*
