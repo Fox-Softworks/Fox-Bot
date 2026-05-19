@@ -1,5 +1,4 @@
-YAKIN ZAMANDA GÜNCELLEME PLANLANIYOR
-
+GÜNCELLEME YAPILDI
 # Fox Bot Dökümantasyonu
 
 ![Fox Bot Logo](logo.png)
